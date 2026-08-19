@@ -464,6 +464,54 @@ jobs:
         if [ ${{ env.ADD_OVERLAYFS_CONFIG }} = true ]; then
             echo "CONFIG_OVERLAY_FS=y" >> arch/${{ env.ARCH }}/configs/${{ env.KERNEL_CONFIG }}
         fi
+            # Droidspaces kernel configuration
+        echo "------------ Enable Droidspaces kernel configs -----------------------------"
+    
+        scripts/config --file arch/${{ env.ARCH }}/configs/${{ env.KERNEL_CONFIG }} \
+          -e CONFIG_SYSCTL \
+          -e CONFIG_SYSVIPC \
+          -e CONFIG_POSIX_MQUEUE \
+          -e CONFIG_NAMESPACES \
+          -e CONFIG_PID_NS \
+          -e CONFIG_UTS_NS \
+          -e CONFIG_IPC_NS \
+          -e CONFIG_SECCOMP \
+          -e CONFIG_SECCOMP_FILTER \
+          -e CONFIG_CGROUPS \
+          -e CONFIG_CGROUP_DEVICE \
+          -e CONFIG_CGROUP_PIDS \
+          -e CONFIG_MEMCG \
+          -e CONFIG_CGROUP_SCHED \
+          -e CONFIG_FAIR_GROUP_SCHED \
+          -e CONFIG_CGROUP_FREEZER \
+          -e CONFIG_CGROUP_NET_PRIO \
+          -e CONFIG_DEVTMPFS \
+          -e CONFIG_OVERLAY_FS \
+          -e CONFIG_TMPFS_POSIX_ACL \
+          -e CONFIG_TMPFS_XATTR \
+          -e CONFIG_FW_LOADER \
+          -e CONFIG_FW_LOADER_USER_HELPER \
+          -e CONFIG_FW_LOADER_COMPRESS \
+          -e CONFIG_NET_NS \
+          -e CONFIG_VETH \
+          -e CONFIG_BRIDGE \
+          -e CONFIG_NETFILTER \
+          -e CONFIG_BRIDGE_NETFILTER \
+          -e CONFIG_NETFILTER_ADVANCED \
+          -e CONFIG_NF_CONNTRACK \
+          -e CONFIG_IP_NF_IPTABLES \
+          -e CONFIG_IP_NF_FILTER \
+          -e CONFIG_NF_NAT \
+          -e CONFIG_NF_TABLES \
+          -e CONFIG_IP_NF_TARGET_MASQUERADE \
+          -e CONFIG_NETFILTER_XT_TARGET_MASQUERADE \
+          -e CONFIG_NETFILTER_XT_TARGET_TCPMSS \
+          -e CONFIG_NETFILTER_XT_MATCH_ADDRTYPE \
+          -e CONFIG_NF_CONNTRACK_NETLINK \
+          -e CONFIG_NF_NAT_REDIRECT \
+          -e CONFIG_IP_ADVANCED_ROUTER \
+          -e CONFIG_IP_MULTIPLE_TABLES \
+          -d CONFIG_ANDROID_PARANOID_NETWORK
         if [ ${{ env.DISABLE-LTO }} = true ]; then
             sed -i 's/CONFIG_LTO=y/CONFIG_LTO=n/' arch/${{ env.ARCH }}/configs/${{ env.KERNEL_CONFIG }}
             sed -i 's/CONFIG_LTO_CLANG=y/CONFIG_LTO_CLANG=n/' arch/${{ env.ARCH }}/configs/${{ env.KERNEL_CONFIG }}
