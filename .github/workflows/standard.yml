@@ -462,8 +462,8 @@ jobs:
          # Droidspaces kernel configuration
         echo "------------ Enable Droidspaces kernel configs -----------------------------"
     
-        scripts/config --file arch/${{ env.ARCH }}/configs/${{ env.KERNEL_CONFIG }} \          
-          -e CONFIG_PID_NS \        
+        scripts/config --file arch/${{ env.ARCH }}/configs/${{ env.KERNEL_CONFIG }} \
+          -e CONFIG_PID_NS \
           -e CONFIG_DEVTMPFS
          
         if [ ${{ env.DISABLE-LTO }} = true ]; then
