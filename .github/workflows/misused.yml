@@ -443,7 +443,7 @@ jobs:
     - name: Apply KSU-side SUSFS patches
       if: env.ENABLE_KERNELSU == 'true' && env.HAS_KSU_SUSFS_PATCHES != 'true'
       run: |
-        cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel/${{ env.KERNELSU_ROOT }}
+        
         patch -p1 < $GITHUB_WORKSPACE/kernel_workspace/android-kernel/kernel_patches/patches/${{ env.SUSFS_PATCH }}
 
     - name: Setup susfs4ksu
