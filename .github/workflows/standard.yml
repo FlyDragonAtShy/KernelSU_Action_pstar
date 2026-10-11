@@ -464,6 +464,7 @@ jobs:
     
         scripts/config --file arch/${{ env.ARCH }}/configs/${{ env.KERNEL_CONFIG }} \
           -e CONFIG_PID_NS \
+          -e CONFIG_USER_NS \
           -e CONFIG_DEVTMPFS
          
         if [ ${{ env.DISABLE-LTO }} = true ]; then
