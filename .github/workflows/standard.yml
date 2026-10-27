@@ -561,7 +561,8 @@ jobs:
             cp android-kernel/out/arch/${{ env.ARCH }}/boot/dtbo.img AnyKernel3/
         fi
         rm -rf AnyKernel3/.git* AnyKernel3/README.md
-        - name: Build boot.img
+        
+    - name: Build boot.img
       if: env.CHECK_FILE_IS_OK == 'true' && env.BUILD_BOOT_IMG == 'true' && env.HAVE_SOURCE_BOOT_IMAGE == 'true'
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace
