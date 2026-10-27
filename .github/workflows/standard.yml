@@ -434,6 +434,12 @@ jobs:
         cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
         curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s ${{ env.KERNELSU_TAG }}
         echo "UPLOADNAME=-KernelSU" >> $GITHUB_ENV
+        
+    - name: Fix KernelSU sepolicy for Lineage 4.19 flex_array
+      run: |
+        cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
+        sed -i 's/LINUX_VERSION_CODE < KERNEL_VERSION(5, 0, 0)/0/g' drivers/kernelsu/selinux/sepolicy.c
+        echo "已强制使用 flex_array 路径"
 
     - name: Disable KPROBES for KernelSU
       if: env.ENABLE_KERNELSU == 'true'
