@@ -561,6 +561,22 @@ jobs:
             cp android-kernel/out/arch/${{ env.ARCH }}/boot/dtbo.img AnyKernel3/
         fi
         rm -rf AnyKernel3/.git* AnyKernel3/README.md
+        - name: Build boot.img
+      if: env.CHECK_FILE_IS_OK == 'true' && env.BUILD_BOOT_IMG == 'true' && env.HAVE_SOURCE_BOOT_IMAGE == 'true'
+      run: |
+        cd $GITHUB_WORKSPACE/kernel_workspace
+        mkdir -p bootimg
+        cp android-kernel/out/arch/${{ env.ARCH }}/boot/${{ env.KERNEL_IMAGE_NAME }} bootimg/kernel
+        # 用源 boot 的参数重新打包
+        eval tools/mkbootimg.py ${{ env.FORMAT_MKBOOTING }} --kernel bootimg/kernel --output bootimg/boot.img
+        ls -lh bootimg/boot.img
+
+    - name: Upload boot.img
+      if: env.CHECK_FILE_IS_OK == 'true' && env.BUILD_BOOT_IMG == 'true' && env.HAVE_SOURCE_BOOT_IMAGE == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: boot${{ env.LOCALVERSION }}${{ env.UPLOADNAME }}-${{ env.DEVICE }}-${{ env.BUILD_TIME }}
+        path: kernel_workspace/bootimg/boot.img
     
     - name: Upload AnyKernel3
       if: env.CHECK_FILE_IS_OK == 'true'
