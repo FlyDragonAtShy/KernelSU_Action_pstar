@@ -567,10 +567,51 @@ jobs:
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace
         mkdir -p bootimg
-        cp android-kernel/out/arch/${{ env.ARCH }}/boot/${{ env.KERNEL_IMAGE_NAME }} bootimg/kernel
-        # 用源 boot 的参数重新打包
-        eval tools/mkbootimg.py ${{ env.FORMAT_MKBOOTING }} --kernel bootimg/kernel --output bootimg/boot.img
+        
+        # 解包源 boot
+        python3 tools/unpack_bootimg.py --boot_img boot-source.img --out bootimg/unpacked
+        
+        # 用新编译的内核替换
+        cp android-kernel/out/arch/${{ env.ARCH }}/boot/${{ env.KERNEL_IMAGE_NAME }} bootimg/unpacked/kernel
+        
+        # 重新打包（用解包后的参数，更可靠）
+        python3 tools/mkbootimg.py \
+          --header_version $(cat bootimg/unpacked/header_version) \
+          --kernel bootimg/unpacked/kernel \
+          --ramdisk bootimg/unpacked/ramdisk \
+          --cmdline "$(cat bootimg/unpacked/cmdline 2>/dev/null || true)" \
+          --board "$(cat bootimg/unpacked/board 2>/dev/null || true)" \
+          --base $(cat bootimg/unpacked/base) \
+          --pagesize $(cat bootimg/unpacked/pagesize) \
+          --kernel_offset $(cat bootimg/unpacked/kernel_offset) \
+          --ramdisk_offset $(cat bootimg/unpacked/ramdisk_offset) \
+          --tags_offset $(cat bootimg/unpacked/tags_offset) \
+          --os_version $(cat bootimg/unpacked/os_version 2>/dev/null || echo 13.0.0) \
+          --os_patch_level $(cat bootimg/unpacked/os_patch_level 2>/dev/null || echo 2024-01) \
+          --output bootimg/boot.img
+        
+        # 如果有 dtb 也带上
+        if [ -f bootimg/unpacked/dtb ]; then
+          python3 tools/mkbootimg.py \
+            --header_version $(cat bootimg/unpacked/header_version) \
+            --kernel bootimg/unpacked/kernel \
+            --ramdisk bootimg/unpacked/ramdisk \
+            --dtb bootimg/unpacked/dtb \
+            --cmdline "$(cat bootimg/unpacked/cmdline 2>/dev/null || true)" \
+            --board "$(cat bootimg/unpacked/board 2>/dev/null || true)" \
+            --base $(cat bootimg/unpacked/base) \
+            --pagesize $(cat bootimg/unpacked/pagesize) \
+            --kernel_offset $(cat bootimg/unpacked/kernel_offset) \
+            --ramdisk_offset $(cat bootimg/unpacked/ramdisk_offset) \
+            --tags_offset $(cat bootimg/unpacked/tags_offset) \
+            --dtb_offset $(cat bootimg/unpacked/dtb_offset 2>/dev/null || echo 0x01f00000) \
+            --os_version $(cat bootimg/unpacked/os_version 2>/dev/null || echo 13.0.0) \
+            --os_patch_level $(cat bootimg/unpacked/os_patch_level 2>/dev/null || echo 2024-01) \
+            --output bootimg/boot.img
+        fi
+        
         ls -lh bootimg/boot.img
+        echo "boot.img 生成成功"
 
     - name: Upload boot.img
       if: env.CHECK_FILE_IS_OK == 'true' && env.BUILD_BOOT_IMG == 'true' && env.HAVE_SOURCE_BOOT_IMAGE == 'true'
