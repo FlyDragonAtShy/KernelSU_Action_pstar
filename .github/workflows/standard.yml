@@ -435,7 +435,8 @@ jobs:
         curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s ${{ env.KERNELSU_TAG }}
         echo "UPLOADNAME=-KernelSU" >> $GITHUB_ENV
         
-    - name: Fix KernelSU sepolicy for Lineage 4.19 flex_array
+    - name: Fix KernelSU sepolicy for Lineage 4.19 
+      if: env.ENABLE_KERNELSU == 'true'
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
         sed -i 's/LINUX_VERSION_CODE < KERNEL_VERSION(5, 0, 0)/0/g' drivers/kernelsu/selinux/sepolicy.c
