@@ -70,6 +70,7 @@ jobs:
         echo "Remove_ANDROID_PARANOID_NETWORK=$(cat $BASE_CONFIG_ENV | grep -w "Remove_ANDROID_PARANOID_NETWORK" | head -n 1 | cut -d "=" -f 2)" >> $GITHUB_ENV
         echo "Add_Kali_Nethunter_Patches=$(cat $BASE_CONFIG_ENV | grep -w "Add_Kali_Nethunter_Patches" | head -n 1 | cut -d "=" -f 2)" >> $GITHUB_ENV
         echo "Generate_Build_Config=$(cat $BASE_CONFIG_ENV | grep -w "Generate_Build_Config" | head -n 1 | cut -d "=" -f 2)" >> $GITHUB_ENV
+        echo "ENABLE_DROIDSPACES_BACKPORTS=$(cat $BASE_CONFIG_ENV | grep -w "ENABLE_DROIDSPACES_BACKPORTS" | head -n 1 | cut -d "=" -f 2)" >> $GITHUB_ENV
 
     - name: Set swap to 10G
       uses: pierotofy/set-swap-space@master
@@ -473,6 +474,89 @@ jobs:
           -e CONFIG_PID_NS \
           -e CONFIG_USER_NS \
           -e CONFIG_DEVTMPFS
+
+    - name: Apply Droidspaces backports (4.19, probe-driven)
+      if: env.ENABLE_DROIDSPACES_BACKPORTS == 'true'
+      run: |
+        set -e
+        cd $GITHUB_WORKSPACE/kernel_workspace
+
+        echo "===== Clone droidspaces-backports ====="
+        git clone --depth=1 https://github.com/Droidspaces/droidspaces-backports.git droidspaces-backports
+
+        KERNEL_DIR=$GITHUB_WORKSPACE/kernel_workspace/android-kernel
+        SERIES_DIR=$GITHUB_WORKSPACE/kernel_workspace/droidspaces-backports/kernel-4.19-series
+        PROBE_OUT=$GITHUB_WORKSPACE/kernel_workspace/droidspaces-probe.txt
+
+        echo "===== Probe kernel features ====="
+        bash droidspaces-backports/tools/probe-kernel.sh "$KERNEL_DIR" | tee "$PROBE_OUT" || true
+        echo "----- probe summary -----"
+        cat "$PROBE_OUT" || true
+
+        # 从 probe 输出判断某项是否已是 yes
+        has_yes() {
+          local key="$1"
+          grep -Eiq "^${key}[[:space:]]+yes" "$PROBE_OUT" 2>/dev/null
+        }
+
+        need_patch() {
+          local key="$1"
+          if has_yes "$key"; then
+            echo "skip (already yes): $key"
+            return 1
+          fi
+          return 0
+        }
+
+        cd "$KERNEL_DIR"
+        git config user.email "actions@github.com" || true
+        git config user.name "github-actions" || true
+
+        apply_one() {
+          local patch_file="$1"
+          local feature_key="$2"
+          local patch_path="$SERIES_DIR/$patch_file"
+
+          if [ ! -f "$patch_path" ]; then
+            echo "missing patch file: $patch_file"
+            return 0
+          fi
+
+          if [ -n "$feature_key" ] && ! need_patch "$feature_key"; then
+            return 0
+          fi
+
+          echo "---- applying: $patch_file (need: ${feature_key:-force}) ----"
+          if git am --3way "$patch_path"; then
+            echo "applied via git am: $patch_file"
+            return 0
+          fi
+
+          git am --abort 2>/dev/null || true
+          if patch -p1 --forward --dry-run < "$patch_path" >/dev/null 2>&1; then
+            patch -p1 --forward < "$patch_path"
+            echo "applied via patch: $patch_file"
+          else
+            echo "skip conflicting/already-applied: $patch_file"
+          fi
+        }
+
+        echo "===== Apply patches by probe result ====="
+        # key 对应 probe 输出里的特性名；空 key 表示强制尝试
+        apply_one "0001-pidfd-add-P_PIDFD-to-waitid.patch" "waitid_P_PIDFD"
+        apply_one "0002-net-introduce-SO_BINDTOIFINDEX-sockopt.patch" "SO_BINDTOIFINDEX"
+        apply_one "0003-statx-add-mount-ID.patch" "STATX_MNT_ID"
+        apply_one "0004-statx-add-mount_root.patch" "STATX_ATTR_MOUNT_ROOT"
+        apply_one "0005-utimensat-AT_EMPTY_PATH-support.patch" "utimensat_AT_EMPTY_PATH"
+        apply_one "0006-vfs-add-faccessat2-syscall.patch" "faccessat2"
+        apply_one "0007-open-add-close_range.patch" "close_range"
+        apply_one "0008-arch-wire-up-close_range.patch" "close_range"
+        apply_one "0009-rtnetlink-accept-nexthop-message-types-and-multicast.patch" "nexthop_RTNLGRP"
+        # 0010 是 x86，手机 arm64 默认不打
+
+        echo "===== Droidspaces backports finished ====="
+        echo "Applied patch commits (if any):"
+        git log --oneline -n 20 || true
          
         if [ ${{ env.DISABLE-LTO }} = true ]; then
             sed -i 's/CONFIG_LTO=y/CONFIG_LTO=n/' arch/${{ env.ARCH }}/configs/${{ env.KERNEL_CONFIG }}
