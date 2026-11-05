@@ -647,57 +647,34 @@ jobs:
         fi
         rm -rf AnyKernel3/.git* AnyKernel3/README.md
         
-    - name: Build boot.img (KernelSU + Magisk)
+    - name: Build boot.img (magiskboot)
       if: env.CHECK_FILE_IS_OK == 'true' && env.BUILD_BOOT_IMG == 'true' && env.HAVE_SOURCE_BOOT_IMAGE == 'true'
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace
         mkdir -p bootimg
         cd bootimg
 
-        # 下载 Magisk
-        MAGISK_VER=28.1
-        wget -q https://github.com/topjohnwu/Magisk/releases/download/v${MAGISK_VER}/Magisk-v${MAGISK_VER}.apk -O magisk.apk
-        unzip -o magisk.apk -d magisk_apk
-
-        # 准备 magiskboot
-        cp magisk_apk/lib/x86_64/libmagiskboot.so ./magiskboot
+        # 下载 magiskboot
+        wget -q https://github.com/topjohnwu/Magisk/releases/download/v28.1/Magisk-v28.1.apk -O magisk.apk
+        unzip -jo magisk.apk lib/x86_64/libmagiskboot.so -d .
+        mv libmagiskboot.so magiskboot
         chmod +x magiskboot
 
         # 准备源 boot 和新内核
         cp ../boot-source.img ./boot.img
         cp ../android-kernel/out/arch/${{ env.ARCH }}/boot/${{ env.KERNEL_IMAGE_NAME }} ./Image
 
-        ########################################
-        # 1. 先替换成 KernelSU 内核
-        ########################################
+        # 解包
         ./magiskboot unpack boot.img
+
+        # 替换 kernel
         cp Image kernel
-        ./magiskboot repack boot.img ksu_boot.img
-        ./magiskboot cleanup
 
-        ########################################
-        # 2. 再对这个 boot 做 Magisk 修补
-        ########################################
-        # 取出 Magisk 官方修补脚本需要的文件
-        cp magisk_apk/assets/boot_patch.sh .
-        cp magisk_apk/assets/util_functions.sh .
-        cp magisk_apk/lib/x86_64/libmagisk.so ./magisk
-        cp magisk_apk/lib/x86_64/libmagiskinit.so ./magiskinit
-        cp magisk_apk/lib/x86_64/libmagiskboot.so ./magiskboot
-        chmod +x magisk magiskinit magiskboot
+        # 重新打包
+        ./magiskboot repack boot.img new_boot.img
 
-        # 执行 Magisk 官方修补
-        KEEPVERITY=true KEEPFORCEENCRYPT=true sh boot_patch.sh ksu_boot.img
-
-        # boot_patch.sh 成功后会生成 new-boot.img
-        if [ -f new-boot.img ]; then
-          mv new-boot.img boot_ksu_magisk.img
-          ls -lh boot.img ksu_boot.img boot_ksu_magisk.img
-          echo "KernelSU + Magisk boot.img 生成成功"
-        else
-          echo "Magisk 修补失败"
-          exit 1
-        fi
+        ls -lh boot.img new_boot.img
+        echo "boot.img 生成成功"
 
     - name: Upload boot.img
       if: env.CHECK_FILE_IS_OK == 'true' && env.BUILD_BOOT_IMG == 'true' && env.HAVE_SOURCE_BOOT_IMAGE == 'true'
