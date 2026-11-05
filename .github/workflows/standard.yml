@@ -681,7 +681,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: boot-KSU-Magisk-${{ env.DEVICE }}-${{ env.BUILD_TIME }}
-        path: kernel_workspace/bootimg/boot_ksu_magisk.img
+        path: kernel_workspace/bootimg/new_boot.img
     
     - name: Upload AnyKernel3
       if: env.CHECK_FILE_IS_OK == 'true'
