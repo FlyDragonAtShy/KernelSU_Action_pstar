@@ -71,7 +71,7 @@ jobs:
         echo "Add_Kali_Nethunter_Patches=$(cat $BASE_CONFIG_ENV | grep -w "Add_Kali_Nethunter_Patches" | head -n 1 | cut -d "=" -f 2)" >> $GITHUB_ENV
         echo "Generate_Build_Config=$(cat $BASE_CONFIG_ENV | grep -w "Generate_Build_Config" | head -n 1 | cut -d "=" -f 2)" >> $GITHUB_ENV
         echo "ENABLE_DROIDSPACES_BACKPORTS=$(cat $BASE_CONFIG_ENV | grep -w "ENABLE_DROIDSPACES_BACKPORTS" | head -n 1 | cut -d "=" -f 2)" >> $GITHUB_ENV
-
+        echo "ENABLE_BAKASU=$(cat $BASE_CONFIG_ENV | grep -w "ENABLE_BAKASU" | head -n 1 | cut -d "=" -f 2)" >> $GITHUB_ENV
     - name: Set swap to 10G
       uses: pierotofy/set-swap-space@master
       with:
@@ -451,6 +451,28 @@ jobs:
         -d CONFIG_KSU_WITH_KPROBES \
         -d CONFIG_KSU_KPROBES_HOOK \
         -e CONFIG_KSU_MANUAL_HOOK
+
+    - name: Setup BakaSU (Non-GKI)
+      if: env.ENABLE_BAKASU == 'true'
+      run: |
+        set -e
+        cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
+
+        # 清理旧 KSU / KSU-Next（按你仓库情况可再加强）
+        rm -rf KernelSU drivers/kernelsu 2>/dev/null || true
+
+        curl -LSs "https://raw.githubusercontent.com/Baka-SU/BakaSU/main/kernel/setup.sh" | bash
+
+        # defconfig 追加
+        DEFCONFIG="arch/${{ env.ARCH }}/configs/${{ env.KERNEL_CONFIG }}"
+        if [ -f "$DEFCONFIG" ]; then
+          grep -q '^CONFIG_KSU=y' "$DEFCONFIG" || echo 'CONFIG_KSU=y' >> "$DEFCONFIG"
+          grep -q '^CONFIG_KSU_MANUAL_HOOK=y' "$DEFCONFIG" || echo 'CONFIG_KSU_MANUAL_HOOK=y' >> "$DEFCONFIG"
+          grep -q '^CONFIG_KALLSYMS=y' "$DEFCONFIG" || echo 'CONFIG_KALLSYMS=y' >> "$DEFCONFIG"
+          grep -q '^CONFIG_KALLSYMS_ALL=y' "$DEFCONFIG" || echo 'CONFIG_KALLSYMS_ALL=y' >> "$DEFCONFIG"
+        else
+          echo "WARN: defconfig not found: $DEFCONFIG"
+        fi
 
     - name: Setup Configuration for Kernel
       run: |
