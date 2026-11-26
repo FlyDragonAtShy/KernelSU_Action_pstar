@@ -452,18 +452,19 @@ jobs:
         -d CONFIG_KSU_KPROBES_HOOK \
         -e CONFIG_KSU_MANUAL_HOOK
 
-    - name: Setup BakaSU (Non-GKI)
+    - name: Setup BakaSU + Manual Hook (4.19 Non-GKI)
       if: env.ENABLE_BAKASU == 'true'
       run: |
         set -e
         cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
 
-        # 清理旧 KSU / KSU-Next（按你仓库情况可再加强）
+        echo "===== Clean old KernelSU ====="
         rm -rf KernelSU drivers/kernelsu 2>/dev/null || true
+        # 若 drivers/Makefile / Kconfig 里残留 kernelsu 行，setup 会再写，一般无妨
 
+        echo "===== Setup BakaSU ====="
         curl -LSs "https://raw.githubusercontent.com/Baka-SU/BakaSU/main/kernel/setup.sh" | bash
 
-        # defconfig 追加
         DEFCONFIG="arch/${{ env.ARCH }}/configs/${{ env.KERNEL_CONFIG }}"
         if [ -f "$DEFCONFIG" ]; then
           grep -q '^CONFIG_KSU=y' "$DEFCONFIG" || echo 'CONFIG_KSU=y' >> "$DEFCONFIG"
@@ -473,6 +474,260 @@ jobs:
         else
           echo "WARN: defconfig not found: $DEFCONFIG"
         fi
+
+        echo "===== Apply Manual Hooks (4.19) ====="
+        python3 - <<'PY'
+        import re, sys
+        from pathlib import Path
+
+        root = Path(".")
+
+        def already(text, marker):
+            return marker in text
+
+        def write(path, text):
+            path.write_text(text)
+            print(f"OK: {path}")
+
+        # ---------- fs/open.c : faccessat (4.19+) ----------
+        p = root / "fs/open.c"
+        if p.exists():
+            t = p.read_text(errors="ignore")
+            if already(t, "ksu_handle_faccessat"):
+                print("skip open.c (already hooked)")
+            else:
+                decl = '''
+        #ifdef CONFIG_KSU_MANUAL_HOOK
+        __attribute__((hot))
+        extern int ksu_handle_faccessat(int *dfd, const char __user **filename_user,
+        				int *mode, int *flags);
+        #endif
+        '''
+                # 插在 SYSCALL_DEFINE3(faccessat 之前
+                t2, n = re.subn(
+                    r'(SYSCALL_DEFINE3\s*\(\s*faccessat\s*,)',
+                    decl + r'\1',
+                    t,
+                    count=1,
+                )
+                if n == 0:
+                    print("WARN: faccessat SYSCALL not found in fs/open.c")
+                else:
+                    t2, n2 = re.subn(
+                        r'(SYSCALL_DEFINE3\s*\(\s*faccessat\s*,[^{]+\{)',
+                        r'''\1
+        #ifdef CONFIG_KSU_MANUAL_HOOK
+        	ksu_handle_faccessat(&dfd, &filename, &mode, NULL);
+        #endif
+        ''',
+                        t2,
+                        count=1,
+                    )
+                    if n2 == 0:
+                        print("WARN: faccessat body hook failed")
+                    else:
+                        write(p, t2)
+        else:
+            print("WARN: fs/open.c missing")
+
+        # ---------- kernel/reboot.c : sys_reboot (3.11+) ----------
+        p = root / "kernel/reboot.c"
+        if p.exists():
+            t = p.read_text(errors="ignore")
+            if already(t, "ksu_handle_sys_reboot"):
+                print("skip reboot.c (already hooked)")
+            else:
+                decl = '''
+        #ifdef CONFIG_KSU_MANUAL_HOOK
+        extern int ksu_handle_sys_reboot(int magic1, int magic2, unsigned int cmd, void __user **arg);
+        #endif
+        '''
+                t2, n = re.subn(
+                    r'(SYSCALL_DEFINE4\s*\(\s*reboot\s*,)',
+                    decl + r'\1',
+                    t,
+                    count=1,
+                )
+                if n == 0:
+                    print("WARN: reboot SYSCALL not found in kernel/reboot.c")
+                else:
+                    t2, n2 = re.subn(
+                        r'(SYSCALL_DEFINE4\s*\(\s*reboot\s*,[^{]+\{)',
+                        r'''\1
+        #ifdef CONFIG_KSU_MANUAL_HOOK
+        	ksu_handle_sys_reboot(magic1, magic2, cmd, &arg);
+        #endif
+        ''',
+                        t2,
+                        count=1,
+                    )
+                    if n2 == 0:
+                        print("WARN: reboot body hook failed")
+                    else:
+                        write(p, t2)
+        else:
+            print("WARN: kernel/reboot.c missing")
+
+        # ---------- drivers/input/input.c : input_event ----------
+        p = root / "drivers/input/input.c"
+        if p.exists():
+            t = p.read_text(errors="ignore")
+            if already(t, "ksu_handle_input_handle_event"):
+                print("skip input.c (already hooked)")
+            else:
+                decl = '''
+        #ifdef CONFIG_KSU_MANUAL_HOOK
+        extern bool ksu_input_hook __read_mostly;
+        extern __attribute__((cold)) int ksu_handle_input_handle_event(
+        			unsigned int *type, unsigned int *code, int *value);
+        #endif
+        '''
+                t2, n = re.subn(
+                    r'(void\s+input_event\s*\(\s*struct\s+input_dev\s*\*\s*dev\s*,)',
+                    decl + r'\1',
+                    t,
+                    count=1,
+                )
+                if n == 0:
+                    print("WARN: input_event not found")
+                else:
+                    t2, n2 = re.subn(
+                        r'(void\s+input_event\s*\([^)]*\)\s*\{)',
+                        r'''\1
+        #ifdef CONFIG_KSU_MANUAL_HOOK
+        	if (unlikely(ksu_input_hook))
+        		ksu_handle_input_handle_event(&type, &code, &value);
+        #endif
+        ''',
+                        t2,
+                        count=1,
+                    )
+                    if n2 == 0:
+                        print("WARN: input_event body hook failed")
+                    else:
+                        write(p, t2)
+        else:
+            print("WARN: drivers/input/input.c missing")
+
+        # ---------- fs/exec.c : do_execveat_common (3.14+) ----------
+        p = root / "fs/exec.c"
+        if p.exists():
+            t = p.read_text(errors="ignore")
+            if already(t, "ksu_handle_execveat"):
+                print("skip exec.c (already hooked)")
+            else:
+                decl = '''
+        #ifdef CONFIG_KSU_MANUAL_HOOK
+        __attribute__((hot))
+        extern int ksu_handle_execveat(int *fd, struct filename **filename_ptr,
+        				void *argv, void *envp, int *flags);
+        __attribute__((hot))
+        extern int ksu_handle_post_execveat(int *fd, struct filename **filename_ptr,
+        				void *argv, void *envp, int *flags, int *retval);
+        #endif
+        '''
+                # 尽量插在 do_execveat_common 定义前
+                t2, n = re.subn(
+                    r'((?:static\s+)?int\s+do_execveat_common\s*\()',
+                    decl + r'\1',
+                    t,
+                    count=1,
+                )
+                if n == 0:
+                    print("WARN: do_execveat_common not found in fs/exec.c")
+                else:
+                    # 函数开头：第一个 { 后插入 pre-hook
+                    t2, n2 = re.subn(
+                        r'((?:static\s+)?int\s+do_execveat_common\s*\([^;]*?\)\s*\{)',
+                        r'''\1
+        #ifdef CONFIG_KSU_MANUAL_HOOK
+        	ksu_handle_execveat(&fd, &filename, &argv, &envp, &flags);
+        #endif
+        ''',
+                        t2,
+                        count=1,
+                        flags=re.S,
+                    )
+                    if n2 == 0:
+                        print("WARN: execveat pre-hook failed")
+                    # 返回前 post-hook：在 out_ret 标签或 return retval 前尽量插入
+                    if "out_ret:" in t2 and "ksu_handle_post_execveat" not in t2:
+                        t2 = t2.replace(
+                            "out_ret:",
+                            '''out_ret:
+        #ifdef CONFIG_KSU_MANUAL_HOOK
+        	ksu_handle_post_execveat(&fd, &filename, &argv, &envp, &flags, &retval);
+        #endif
+        ''',
+                            1,
+                        )
+                        write(p, t2)
+                    elif n2:
+                        write(p, t2)
+                        print("WARN: post_execveat may need manual check")
+        else:
+            print("WARN: fs/exec.c missing")
+
+        # ---------- fs/stat.c : newfstatat / newfstat ----------
+        p = root / "fs/stat.c"
+        if p.exists():
+            t = p.read_text(errors="ignore")
+            if already(t, "ksu_handle_stat"):
+                print("skip stat.c (already hooked)")
+            else:
+                decl = '''
+        #ifdef CONFIG_KSU_MANUAL_HOOK
+        __attribute__((hot))
+        extern int ksu_handle_stat(int *dfd, const char __user **filename_user, int *flags);
+        extern void ksu_handle_newfstat_ret(unsigned int *fd, struct stat __user **statbuf_ptr);
+        #endif
+        '''
+                t2, n = re.subn(
+                    r'(SYSCALL_DEFINE4\s*\(\s*newfstatat\s*,)',
+                    decl + r'\1',
+                    t,
+                    count=1,
+                )
+                if n == 0:
+                    # 有的树用 vfs_fstatat 包装名不同，再试
+                    print("WARN: newfstatat not found, try generic insert")
+                    t2 = t
+                t2, n2 = re.subn(
+                    r'(SYSCALL_DEFINE4\s*\(\s*newfstatat\s*,[^{]+\{)',
+                    r'''\1
+        #ifdef CONFIG_KSU_MANUAL_HOOK
+        	ksu_handle_stat(&dfd, &filename, &flag);
+        #endif
+        ''',
+                    t2,
+                    count=1,
+                )
+                # newfstat 返回值 hook
+                t2, n3 = re.subn(
+                    r'(SYSCALL_DEFINE2\s*\(\s*newfstat\s*,[^{]+\{[\s\S]*?return error;\s*\})',
+                    lambda m: m.group(0).replace(
+                        "return error;",
+                        '''#ifdef CONFIG_KSU_MANUAL_HOOK
+        	ksu_handle_newfstat_ret(&fd, &statbuf);
+        #endif
+        	return error;''',
+                        1,
+                    ) if "ksu_handle_newfstat_ret" not in m.group(0) else m.group(0),
+                    t2,
+                    count=1,
+                )
+                if n2 or n3:
+                    write(p, t2)
+                else:
+                    print("WARN: stat.c hooks incomplete, check manually")
+        else:
+            print("WARN: fs/stat.c missing")
+
+        print("===== Manual hook pass done =====")
+        PY
+
+        echo "===== Grep hook markers ====="
+        grep -n "ksu_handle_" fs/open.c fs/exec.c fs/stat.c kernel/reboot.c drivers/input/input.c 2>/dev/null || true
 
     - name: Setup Configuration for Kernel
       run: |
