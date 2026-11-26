@@ -726,6 +726,70 @@ jobs:
         print("===== Manual hook pass done =====")
         PY
 
+        cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
+
+        python3 - <<'PY'
+        from pathlib import Path
+        import re
+        
+        p = Path("fs/stat.c")
+        t = p.read_text(errors="ignore")
+        
+        if "ksu_handle_fstat64_ret" in t:
+            print("already has ksu_handle_fstat64_ret")
+            raise SystemExit(0)
+        
+        # 1) 声明：若已有 ksu_handle_newfstat_ret 声明块，在其中追加；否则单独加
+        if "ksu_handle_newfstat_ret" in t and "ksu_handle_fstat64_ret" not in t:
+            t = t.replace(
+                "extern void ksu_handle_newfstat_ret(unsigned int *fd, struct stat __user **statbuf_ptr);",
+                "extern void ksu_handle_newfstat_ret(unsigned int *fd, struct stat __user **statbuf_ptr);\n"
+                "#if defined(__ARCH_WANT_STAT64) || defined(__ARCH_WANT_COMPAT_STAT64)\n"
+                "extern void ksu_handle_fstat64_ret(unsigned long *fd, struct stat64 __user **statbuf_ptr);\n"
+                "#endif",
+                1,
+            )
+        else:
+            decl = '''
+        #ifdef CONFIG_KSU_MANUAL_HOOK
+        #if defined(__ARCH_WANT_STAT64) || defined(__ARCH_WANT_COMPAT_STAT64)
+        extern void ksu_handle_fstat64_ret(unsigned long *fd, struct stat64 __user **statbuf_ptr);
+        #endif
+        #endif
+        '''
+            m = re.search(r'SYSCALL_DEFINE2\s*\(\s*fstat64\s*,', t)
+            if not m:
+                raise SystemExit("ERROR: SYSCALL_DEFINE2(fstat64) not found")
+            t = t[:m.start()] + decl + t[m.start():]
+        
+        # 2) 在 fstat64 返回前插入
+        # 典型结构: error = cp_new_stat64(...); return error;
+        pat = re.compile(
+            r'(SYSCALL_DEFINE2\s*\(\s*fstat64\s*,[\s\S]*?)(return error;\s*\})',
+            re.M,
+        )
+        m = pat.search(t)
+        if not m:
+            raise SystemExit("ERROR: cannot find fstat64 return error pattern")
+        
+        if "ksu_handle_fstat64_ret" in m.group(0):
+            print("body already hooked")
+        else:
+            body = m.group(1) + '''#ifdef CONFIG_KSU_MANUAL_HOOK // for 32-bit
+        	ksu_handle_fstat64_ret(&fd, &statbuf);
+        #endif
+        	''' + m.group(2)
+            t = t[:m.start()] + body + t[m.end():]
+        
+        p.write_text(t)
+        print("OK: patched ksu_handle_fstat64_ret in fs/stat.c")
+        print("markers:")
+        for i, line in enumerate(p.read_text().splitlines(), 1):
+            if "ksu_handle_fstat64" in line or "ksu_handle_newfstat" in line:
+                print(f"  {i}: {line}")
+        PY
+        
+        grep -n "ksu_handle_fstat64_ret\|SYSCALL_DEFINE2(fstat64" fs/stat.c
         echo "===== Grep hook markers ====="
         grep -n "ksu_handle_" fs/open.c fs/exec.c fs/stat.c kernel/reboot.c drivers/input/input.c 2>/dev/null || true
 
